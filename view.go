@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"image/color"
 	"math"
 	"strings"
 	"time"
@@ -85,50 +86,44 @@ func (m model) sections(th Theme, width int, compact bool) []string {
 	}
 	parts = append(parts,
 		m.clock(th, width),
-		lipgloss.PlaceHorizontal(width, lipgloss.Center, m.phaseLabel(th)),
+		th.centerOnSurface(width, m.phaseLabel(th)),
 		m.bar(th, width),
-		spread(m.status(th), m.percent(th), width),
+		spread(m.status(th), m.percent(th), width, th.surfaceFill),
 	)
 	if gap != "" {
 		parts = append(parts, "")
 	}
-	parts = append(parts, lipgloss.PlaceHorizontal(width, lipgloss.Center, m.pipLine(th, width)))
+	parts = append(parts, m.pipLine(th, width))
 	if !compact {
-		parts = append(parts, lipgloss.PlaceHorizontal(width, lipgloss.Center, m.schedule(th)))
+		parts = append(parts, th.centerOnSurface(width, m.schedule(th)))
 	}
 	parts = append(parts,
-		lipgloss.NewStyle().Foreground(th.Track).Render(strings.Repeat("─", width)),
+		th.ink(th.Track).Render(strings.Repeat("─", width)),
 	)
 	for _, line := range m.help(th, width) {
-		parts = append(parts, lipgloss.PlaceHorizontal(width, lipgloss.Center, line))
+		parts = append(parts, th.centerOnSurface(width, line))
 	}
 	return parts
 }
 
 func (m model) header(th Theme, width int) string {
-	mark := lipgloss.NewStyle().Foreground(th.phaseColor(m.phase)).Render("●")
-	title := lipgloss.NewStyle().Foreground(th.Accent).Bold(true).Render("pomodoro")
-	name := lipgloss.NewStyle().Foreground(th.Muted).Render(th.Name)
-	return spread(mark+" "+title, name, width)
+	mark := th.ink(th.phaseColor(m.phase)).Render("●")
+	title := th.ink(th.Accent).Bold(true).Render("pomodoro")
+	name := th.ink(th.Muted).Render(th.Name)
+	return spread(mark+th.surfaceFill(1)+title, name, width, th.surfaceFill)
 }
 
 func (m model) clock(th Theme, width int) string {
 	text := fmtClock(m.remaining)
 	art := clockArt(text, m.colonOn || !m.running)
 	if lipgloss.Width(art) > width {
-		return lipgloss.PlaceHorizontal(width, lipgloss.Center,
-			lipgloss.NewStyle().Foreground(th.phaseColor(m.phase)).Bold(true).Render(text),
-		)
+		return th.centerOnSurface(width, th.ink(th.phaseColor(m.phase)).Bold(true).Render(text))
 	}
-	styled := lipgloss.NewStyle().Foreground(th.phaseColor(m.phase)).Render(art)
-	return lipgloss.PlaceHorizontal(width, lipgloss.Center, styled)
+	return th.centerOnSurface(width, th.ink(th.phaseColor(m.phase)).Render(art))
 }
 
 func (m model) phaseLabel(th Theme) string {
-	return lipgloss.NewStyle().
-		Foreground(th.phaseColor(m.phase)).
-		Bold(true).
-		Render(tracked(m.phase.label()))
+	return th.ink(th.phaseColor(m.phase)).Bold(true).Render(tracked(m.phase.label()))
 }
 
 func (m model) bar(th Theme, width int) string {
@@ -143,33 +138,34 @@ func (m model) bar(th Theme, width int) string {
 	if filled > 0 {
 		colors := lipgloss.Blend1D(filled, th.phaseColor(m.phase), lipgloss.Lighten(th.phaseColor(m.phase), 0.45))
 		for i := range filled {
-			b.WriteString(lipgloss.NewStyle().Foreground(colors[i]).Render("█"))
+			b.WriteString(th.ink(colors[i]).Render("█"))
 		}
 	}
 	if rest := width - filled; rest > 0 {
-		b.WriteString(lipgloss.NewStyle().Foreground(th.Track).Render(strings.Repeat("░", rest)))
+		b.WriteString(th.ink(th.Track).Render(strings.Repeat("░", rest)))
 	}
 	return b.String()
 }
 
 func (m model) status(th Theme) string {
 	label := m.statusLabel()
-	style := lipgloss.NewStyle().Foreground(th.Muted)
+	style := th.ink(th.Muted)
 	if m.notice != "" && !m.running {
-		style = lipgloss.NewStyle().Foreground(th.Accent).Bold(true)
+		style = th.ink(th.Accent).Bold(true)
 	}
 	return style.Render(label)
 }
 
 func (m model) percent(th Theme) string {
 	pct := int(math.Round(m.progress() * 100))
-	return lipgloss.NewStyle().Foreground(th.Muted).Render(fmt.Sprintf("%d%%", pct))
+	return th.ink(th.Muted).Render(fmt.Sprintf("%d%%", pct))
 }
 
 func (m model) pipLine(th Theme, width int) string {
-	filled := lipgloss.NewStyle().Foreground(th.phaseColor(m.phase))
-	current := lipgloss.NewStyle().Foreground(th.Accent)
-	empty := lipgloss.NewStyle().Foreground(th.Track)
+	filled := th.onShade(th.phaseColor(m.phase))
+	current := th.onShade(th.Accent)
+	empty := th.onShade(th.Track)
+	gap := th.shadeFill(1)
 	parts := make([]string, 0, cycleLength)
 	for i := range cycleLength {
 		switch {
@@ -181,14 +177,20 @@ func (m model) pipLine(th Theme, width int) string {
 			parts = append(parts, empty.Render("○"))
 		}
 	}
-	sep := lipgloss.NewStyle().Foreground(th.Track).Render("  ")
-	pips := strings.Join(parts, " ")
-	done := lipgloss.NewStyle().Foreground(th.Muted)
+	pips := strings.Join(parts, gap)
+	sep := th.shadeFill(2)
+	done := th.onShade(th.Muted)
 	line := pips + sep + done.Render(doneLabel(m.completed))
-	if lipgloss.Width(line) > width {
+	if lipgloss.Width(line)+2 > width {
 		line = pips + sep + done.Render(shortDone(m.completed))
 	}
-	return line
+	// One cell of shade on either side keeps the first pip inside the chip
+	// instead of letting the page color run to the card edge and the next row.
+	chip := line
+	if lipgloss.Width(line)+2 <= width {
+		chip = th.shadeFill(1) + line + th.shadeFill(1)
+	}
+	return th.centerOnSurface(width, chip)
 }
 
 func (m model) schedule(th Theme) string {
@@ -196,13 +198,13 @@ func (m model) schedule(th Theme) string {
 	parts := make([]string, len(names))
 	for i, name := range names {
 		text := fmt.Sprintf("%s %d", name, int(m.durations[i]/time.Minute))
-		style := lipgloss.NewStyle().Foreground(th.Muted)
+		style := th.ink(th.Muted)
 		if phase(i) == m.phase {
-			style = lipgloss.NewStyle().Foreground(th.phaseColor(m.phase)).Bold(true)
+			style = th.ink(th.phaseColor(m.phase)).Bold(true)
 		}
 		parts[i] = style.Render(text)
 	}
-	sep := lipgloss.NewStyle().Foreground(th.Track).Render(" · ")
+	sep := th.ink(th.Track).Render(" · ")
 	return strings.Join(parts, sep)
 }
 
@@ -236,15 +238,16 @@ func (m model) help(th Theme, width int) []string {
 }
 
 func packHints(th Theme, width int, items []hint) []string {
-	sep := lipgloss.NewStyle().Foreground(th.Track).Render(" · ")
+	sep := th.ink(th.Track).Render(" · ")
 	sepW := lipgloss.Width(sep)
+	sp := th.surfaceFill(1)
 	var lines []string
 	var cur []string
 	curW := 0
 	for _, item := range items {
-		piece := lipgloss.NewStyle().Foreground(th.Accent).Bold(true).Render(item.key) +
-			" " +
-			lipgloss.NewStyle().Foreground(th.Muted).Render(item.label)
+		piece := th.ink(th.Accent).Bold(true).Render(item.key) +
+			sp +
+			th.ink(th.Muted).Render(item.label)
 		w := lipgloss.Width(piece)
 		extra := w
 		if len(cur) > 0 {
@@ -291,10 +294,41 @@ func tracked(s string) string {
 	return strings.Join(parts, " ")
 }
 
-func spread(left, right string, width int) string {
+func spread(left, right string, width int, fill func(int) string) string {
 	gap := width - lipgloss.Width(left) - lipgloss.Width(right)
 	if gap < 1 {
 		return left + "\n" + right
 	}
-	return left + strings.Repeat(" ", gap) + right
+	return left + fill(gap) + right
+}
+
+// ink draws on the card. Foreground-only styles reset the background, which
+// lets the darker page color show through the rest of the line.
+func (t Theme) ink(c color.Color) lipgloss.Style {
+	return lipgloss.NewStyle().Foreground(c).Background(t.Surface)
+}
+
+// onShade draws on the focus-counter chip.
+func (t Theme) onShade(c color.Color) lipgloss.Style {
+	return lipgloss.NewStyle().Foreground(c).Background(t.Bg)
+}
+
+func (t Theme) surfaceFill(n int) string {
+	if n < 1 {
+		return ""
+	}
+	return lipgloss.NewStyle().Background(t.Surface).Render(strings.Repeat(" ", n))
+}
+
+func (t Theme) shadeFill(n int) string {
+	if n < 1 {
+		return ""
+	}
+	return lipgloss.NewStyle().Background(t.Bg).Render(strings.Repeat(" ", n))
+}
+
+func (t Theme) centerOnSurface(width int, s string) string {
+	return lipgloss.PlaceHorizontal(width, lipgloss.Center, s,
+		lipgloss.WithWhitespaceStyle(lipgloss.NewStyle().Background(t.Surface)),
+	)
 }
